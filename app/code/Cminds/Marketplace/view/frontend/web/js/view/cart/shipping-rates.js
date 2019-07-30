@@ -14,8 +14,10 @@ define(
         'Magento_Checkout/js/model/shipping-service',
         'Magento_Catalog/js/price-utils',
         'Magento_Checkout/js/model/quote',
+        'Cminds_Marketplace/js/model/shipping-methods',
         'Magento_Checkout/js/action/select-shipping-method',
-        'Magento_Checkout/js/checkout-data'
+        'Magento_Checkout/js/checkout-data',
+        'Magento_Checkout/js/model/cart/cache'
     ],
     function (
         $,
@@ -25,11 +27,13 @@ define(
         shippingService,
         priceUtils,
         quote,
+        shippingMethods,
         selectShippingMethodAction,
-        checkoutData
+        checkoutData,
+        cartCache
     ) {
         'use strict';
-
+        var items  = quote.getItems();
         return Component.extend({
             defaults: {
                 template: 'Cminds_Marketplace/cart/shipping-rates'
@@ -40,7 +44,7 @@ define(
             shippingRateGroups: ko.observableArray([]),
             selectedShippingMethod: ko.computed(function () {
                     return quote.shippingMethod() ?
-                    quote.shippingMethod()['carrier_code'] + '_' + quote.shippingMethod()['method_code'] :
+                        quote.shippingMethod()['carrier_code'] + '_' + quote.shippingMethod()['method_code'] :
                         null;
                 }
             ),
@@ -53,7 +57,49 @@ define(
              */
             initObservable: function () {
                 var self = this;
+                var i;
                 this._super();
+
+                $(document).on('change', "[name='country_id']", function () {
+                    var countryId = $('[name="country_id"] > option:selected').val();
+                    if (countryId == '') {
+                        var countryId = quote.shippingAddress().countryId;
+                    }
+
+                    $.ajax({
+                        url: window.checkoutConfig.baseUrl+'/marketplace/checkout/getproductsbyvendors',
+                        type: "POST",
+                        showLoader: true,
+                        data: { json: JSON.stringify(
+                                items
+                            ),cid:countryId },
+                        dataType: 'json',
+                        success: function (data) {
+                            for (i = 0; i < data.length; ++i) {
+                                var methodstemp = data[i].methods;
+                            }
+                            var shippingratesupplier = methodstemp[0].price;
+                            var mappedShippingRates = $.map(
+                                window.checkoutConfig.supplierShippingRates,
+                                function(data) {
+                                    return {
+                                        'id': data.id,
+                                        'name': data.name,
+                                        'supplierId': parseInt(data.supplier_id),
+                                        'price': parseFloat(shippingratesupplier),
+                                        'selected': ko.observable(data.selected ? data.id : 0)
+                                    };
+                                }
+                            );
+                            self.supplierShippingRates(mappedShippingRates);
+                            setTimeout( function() {
+                                $('.supplier_methods').prop("disabled", false);
+                                $('.supplier_methods').removeAttr("disabled");
+                                $('.supplier_methods').click();
+                            }, 1000);
+                        }
+                    });
+                });
 
                 this.shippingRates.subscribe(function (rates) {
                     self.shippingRateGroups([]);
@@ -132,11 +178,12 @@ define(
                     },
                     dataType: 'json',
                     success: function (data) {
+                        cartCache.set('totals',null);
                         $('#s_method_supplier')
                             .trigger('click');
                         $('#s_method_supplier')
                             .next('label')
-                            .html('Supplier Shipping $'+data.price_total.toFixed(2)+'');
+                            .html('Supplier '+priceUtils.formatPrice(data.price_total)+'');
                     }
                 });
 
